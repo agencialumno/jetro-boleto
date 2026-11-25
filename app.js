@@ -126,7 +126,7 @@ tabBtns.forEach((btn) => {
   });
 });
 
-// Eventos Drag & Drop (suporte a múltiplos arquivos)
+// Eventos Drag & Drop
 ['dragenter', 'dragover'].forEach((evt) => {
   dropZone.addEventListener(evt, (e) => {
     e.preventDefault();
@@ -174,61 +174,67 @@ btnVerifyLine.addEventListener('click', () => {
 });
 
 // Botões de Demonstração Rápida
-document.getElementById('demo-batch').addEventListener('click', () => {
-  const items = [
-    {
-      label: 'Boleto_Condominio_01.pdf',
-      type: 'simulated',
-      payload: {
-        mode: 'pdf',
-        fileName: 'Boleto_Condominio_01.pdf',
-        rawLine: '48190.00003 00005.150586 92257.040144 2 16320002419200',
-        text: 'Superlogica 481-2 CONDOMINIO PONTOES DA BARRA CNPJ: 29.279.239/0001-24 Vencimento 16/11/2026 Valor do documento 24.192,00',
-        producer: 'wkhtmltopdf 0.12.6',
-        creator: 'Superlogica',
-        binaryForensics: { eofCount: 1, hasIncrementalPrev: false, hasOverlayAnnotations: false }
+const demoBatchBtn = document.getElementById('demo-batch');
+if (demoBatchBtn) {
+  demoBatchBtn.addEventListener('click', () => {
+    const items = [
+      {
+        label: 'Boleto_Condominio_01.pdf',
+        type: 'simulated',
+        payload: {
+          mode: 'pdf',
+          fileName: 'Boleto_Condominio_01.pdf',
+          rawLine: '48190.00003 00005.150586 92257.040144 2 16320002419200',
+          text: 'Superlogica 481-2 CONDOMINIO PONTOES DA BARRA CNPJ: 29.279.239/0001-24 Vencimento 16/11/2026 Valor do documento 24.192,00',
+          producer: 'wkhtmltopdf 0.12.6',
+          creator: 'Superlogica',
+          binaryForensics: { eofCount: 1, hasIncrementalPrev: false, hasOverlayAnnotations: false }
+        }
+      },
+      {
+        label: 'Boleto_Cota_Extra_02.pdf',
+        type: 'simulated',
+        payload: {
+          mode: 'line',
+          rawLine: '63390.00116 12455.479605 06344.165664 8 16320002419200'
+        }
+      },
+      {
+        label: 'Boleto_Adulterado_03.pdf',
+        type: 'simulated',
+        payload: {
+          mode: 'pdf',
+          fileName: 'Boleto_Adulterado_03.pdf',
+          rawLine: '26091.09008 63571.277308 71444.640009 1 13500000085000',
+          text: 'Banco Itaú S.A. - CNPJ 12.345.678/0001-90 - Valor do documento 420,00 - Condomínio Residencial',
+          producer: 'PDFium',
+          creator: 'PDFium',
+          binaryForensics: { eofCount: 2, hasIncrementalPrev: true, hasOverlayAnnotations: true }
+        }
       }
-    },
-    {
-      label: 'Boleto_Cota_Extra_02.pdf',
-      type: 'simulated',
-      payload: {
-        mode: 'line',
-        rawLine: '63390.00116 12455.479605 06344.165664 8 16320002419200'
-      }
-    },
-    {
-      label: 'Boleto_Adulterado_03.pdf',
-      type: 'simulated',
-      payload: {
-        mode: 'pdf',
-        fileName: 'Boleto_Adulterado_03.pdf',
-        rawLine: '26091.09008 63571.277308 71444.640009 1 13500000085000',
-        text: 'Banco Itaú S.A. - CNPJ 12.345.678/0001-90 - Valor do documento 420,00 - Condomínio Residencial',
-        producer: 'PDFium',
-        creator: 'PDFium',
-        binaryForensics: { eofCount: 2, hasIncrementalPrev: true, hasOverlayAnnotations: true }
-      }
-    }
-  ];
-  processBatch(items);
-});
+    ];
+    processBatch(items);
+  });
+}
 
-document.getElementById('demo-fraud').addEventListener('click', () => {
-  const sampleFraud = '26091.09008 63571.277308 71444.640009 1 13500000085000';
-  digitableInput.value = sampleFraud;
-  processBatch([
-    {
-      label: 'Simulação de Boleto Adulterado',
-      type: 'simulated',
-      payload: {
-        mode: 'line',
-        rawLine: sampleFraud,
-        simulatedDocText: 'Banco Itaú S.A. - CNPJ 12.345.678/0001-90 - Valor do documento 420,00 - Condomínio Residencial'
+const demoFraudBtn = document.getElementById('demo-fraud');
+if (demoFraudBtn) {
+  demoFraudBtn.addEventListener('click', () => {
+    const sampleFraud = '26091.09008 63571.277308 71444.640009 1 13500000085000';
+    digitableInput.value = sampleFraud;
+    processBatch([
+      {
+        label: 'Simulação de Boleto Adulterado',
+        type: 'simulated',
+        payload: {
+          mode: 'line',
+          rawLine: sampleFraud,
+          simulatedDocText: 'Banco Itaú S.A. - CNPJ 12.345.678/0001-90 - Valor do documento 420,00 - Condomínio Residencial'
+        }
       }
-    }
-  ]);
-});
+    ]);
+  });
+}
 
 // Filtros e Expandir/Recolher
 document.querySelectorAll('.filter-btn').forEach((btn) => {
@@ -240,20 +246,23 @@ document.querySelectorAll('.filter-btn').forEach((btn) => {
   });
 });
 
-document.getElementById('btn-toggle-all').addEventListener('click', () => {
-  const bodies = document.querySelectorAll('.report-body');
-  const hasCollapsed = Array.from(bodies).some((b) => b.classList.contains('collapsed'));
-  bodies.forEach((b) => {
-    if (hasCollapsed) {
-      b.classList.remove('collapsed');
-    } else {
-      b.classList.add('collapsed');
-    }
+const toggleAllBtn = document.getElementById('btn-toggle-all');
+if (toggleAllBtn) {
+  toggleAllBtn.addEventListener('click', () => {
+    const bodies = document.querySelectorAll('.report-body');
+    const hasCollapsed = Array.from(bodies).some((b) => b.classList.contains('collapsed'));
+    bodies.forEach((b) => {
+      if (hasCollapsed) {
+        b.classList.remove('collapsed');
+      } else {
+        b.classList.add('collapsed');
+      }
+    });
+    document.querySelectorAll('.toggle-indicator').forEach((el) => {
+      el.textContent = hasCollapsed ? 'Ocultar' : 'Detalhes';
+    });
   });
-  document.querySelectorAll('.toggle-indicator').forEach((el) => {
-    el.textContent = hasCollapsed ? 'Ocultar' : 'Detalhes';
-  });
-});
+}
 
 document.getElementById('btn-reset').addEventListener('click', () => {
   resultSection.classList.add('hidden');
@@ -293,11 +302,7 @@ async function processBatch(items) {
   for (let i = 0; i < total; i++) {
     const item = items[i];
     const pct = Math.round(((i + 0.5) / total) * 100);
-    showProgress(
-      `Auditando ${i + 1} de ${total}...`,
-      `Analisando: ${item.label}`,
-      pct
-    );
+    showProgress(`Auditando ${i + 1} de ${total}...`, `Analisando: ${item.label}`, pct);
 
     try {
       let payload;
@@ -322,25 +327,24 @@ async function processBatch(items) {
       const report = evaluateSingleBoleto(i + 1, item.label, payload);
       reports.push(report);
     } catch (err) {
-      console.error(err);
-      reports.push(
-        buildUnreadableReport(
-          i + 1,
-          item.label,
-          'Não foi possível ler este arquivo (pode estar corrompido ou protegido por senha).'
-        )
-      );
+      console.error('Erro detalhado na leitura do arquivo:', err);
+      const isPassword = err && err.name === 'PasswordException';
+      const detailMsg = isPassword
+        ? 'Este PDF está protegido por senha. Remova a senha ou envie um print da tela.'
+        : `Falha técnica ao decodificar o PDF (${err?.message || 'estrutura incompatível'}). Tente reabrir o arquivo ou enviar um print da tela.`;
+      reports.push(buildUnreadableReport(i + 1, item.label, detailMsg));
     }
   }
 
   showProgress('Concluído!', 'Gerando relatórios individuais...', 100);
-  await new Promise((r) => setTimeout(r, 250));
+  await new Promise((r) => setTimeout(r, 200));
   hideProgress();
 
   currentReports = reports;
   activeFilter = 'all';
   document.querySelectorAll('.filter-btn').forEach((b) => b.classList.remove('active'));
-  document.querySelector('.filter-btn[data-filter="all"]').classList.add('active');
+  const allFilterBtn = document.querySelector('.filter-btn[data-filter="all"]');
+  if (allFilterBtn) allFilterBtn.classList.add('active');
 
   renderBatchResults(reports);
 }
@@ -361,11 +365,51 @@ function buildUnreadableReport(index, title, reason) {
   };
 }
 
-// Extração de PDF
+// Extração resiliente de PDF (com limpeza de cabeçalho, fallback sem Worker e escala adaptativa)
 async function extractFromPDF(file) {
-  const arrayBuffer = await file.arrayBuffer();
-  const binaryForensics = inspectPdfBinary(arrayBuffer);
-  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer.slice(0) }).promise;
+  if (!window.pdfjsLib) {
+    throw new Error('Biblioteca PDF.js não carregou. Verifique sua conexão com a internet.');
+  }
+
+  const rawBuffer = await file.arrayBuffer();
+  const rawBytes = new Uint8Array(rawBuffer);
+
+  // Localiza cabeçalho %PDF- caso o servidor bancário tenha inserido bytes extras antes do arquivo
+  const marker = [0x25, 0x50, 0x44, 0x46, 0x2d]; // %PDF-
+  let startOffset = 0;
+  for (let i = 0; i < Math.min(rawBytes.length - 5, 1024); i++) {
+    if (
+      rawBytes[i] === marker[0] &&
+      rawBytes[i + 1] === marker[1] &&
+      rawBytes[i + 2] === marker[2] &&
+      rawBytes[i + 3] === marker[3] &&
+      rawBytes[i + 4] === marker[4]
+    ) {
+      startOffset = i;
+      break;
+    }
+  }
+
+  const cleanBytes = startOffset > 0 ? rawBytes.slice(startOffset) : rawBytes;
+  const binaryForensics = inspectPdfBinary(cleanBytes.buffer);
+
+  // 1ª tentativa: com Worker | 2ª tentativa (fallback): sem Worker (resolve execução local file:// ou bloqueio de rede)
+  let pdf;
+  try {
+    pdf = await pdfjsLib.getDocument({
+      data: cleanBytes.slice(),
+      stopAtErrors: false
+    }).promise;
+  } catch (workerErr) {
+    if (workerErr && workerErr.name === 'PasswordException') {
+      throw workerErr;
+    }
+    pdf = await pdfjsLib.getDocument({
+      data: cleanBytes.slice(),
+      disableWorker: true,
+      stopAtErrors: false
+    }).promise;
+  }
 
   let producer = '';
   let creator = '';
@@ -379,24 +423,37 @@ async function extractFromPDF(file) {
     modDate = meta?.info?.ModDate || '';
   } catch (_) {}
 
+  // Extrai texto de até 2 páginas de forma isolada
   let fullText = '';
   const maxPages = Math.min(pdf.numPages, 2);
   for (let i = 1; i <= maxPages; i++) {
-    const page = await pdf.getPage(i);
-    const content = await page.getTextContent();
-    fullText += ' ' + content.items.map((item) => item.str).join(' ');
+    try {
+      const page = await pdf.getPage(i);
+      const content = await page.getTextContent();
+      fullText += ' ' + content.items.map((item) => item.str).join(' ');
+    } catch (_) {}
   }
 
-  const page1 = await pdf.getPage(1);
-  const viewport = page1.getViewport({ scale: 3.0 });
-  const canvas = document.createElement('canvas');
-  const ctx = canvas.getContext('2d');
-  canvas.width = viewport.width;
-  canvas.height = viewport.height;
-  await page1.render({ canvasContext: ctx, viewport }).promise;
+  // Renderiza página 1 com escala adaptativa para não estourar memória do canvas
+  let qrPayload = null;
+  let visualBarcode44 = null;
+  try {
+    const page1 = await pdf.getPage(1);
+    const baseViewport = page1.getViewport({ scale: 1.0 });
+    const targetScale = Math.min(3.0, Math.max(1.2, 2200 / (baseViewport.width || 600)));
+    const viewport = page1.getViewport({ scale: targetScale });
 
-  const qrPayload = scanCanvasForQR(ctx, canvas.width, canvas.height);
-  const visualBarcode44 = decodeITFBarcodeFromCanvas(ctx, canvas.width, canvas.height);
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    canvas.width = Math.floor(viewport.width);
+    canvas.height = Math.floor(viewport.height);
+
+    await page1.render({ canvasContext: ctx, viewport }).promise;
+    qrPayload = scanCanvasForQR(ctx, canvas.width, canvas.height);
+    visualBarcode44 = decodeITFBarcodeFromCanvas(ctx, canvas.width, canvas.height);
+  } catch (renderErr) {
+    console.warn('Aviso ao renderizar camada gráfica do PDF:', renderErr);
+  }
 
   return {
     text: fullText,
@@ -418,7 +475,7 @@ function extractFromImage(file) {
       const img = new Image();
       img.onload = () => {
         const canvas = document.createElement('canvas');
-        const ctx = canvas.getContext('2d');
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
         canvas.width = img.width;
         canvas.height = img.height;
         ctx.drawImage(img, 0, 0);
@@ -435,10 +492,10 @@ function extractFromImage(file) {
           visualBarcode44
         });
       };
-      img.onerror = reject;
+      img.onerror = () => reject(new Error('Imagem inválida ou corrompida.'));
       img.src = reader.result;
     };
-    reader.onerror = reject;
+    reader.onerror = () => reject(new Error('Não foi possível ler o arquivo de imagem.'));
     reader.readAsDataURL(file);
   });
 }
@@ -573,7 +630,7 @@ function getFormattedSoftwareName(producer, creator) {
   return p || c;
 }
 
-// Avalia um único boleto e retorna objeto estruturado de relatório
+// Avalia um único boleto
 function evaluateSingleBoleto(index, title, payload) {
   const checks = [];
   let riskPoints = 0;
@@ -822,7 +879,7 @@ function evaluateSingleBoleto(index, title, payload) {
   };
 }
 
-// Renderiza o painel consolidado e todos os relatórios individuais separados
+// Renderiza painel consolidado e relatórios individuais
 function renderBatchResults(reports) {
   const total = reports.length;
   const dangerCount = reports.filter((r) => r.statusKey === 'danger').length;
@@ -866,7 +923,6 @@ function renderBatchResults(reports) {
   document.getElementById('count-warning').textContent = warningCount;
   document.getElementById('count-safe').textContent = safeCount;
 
-  // Mostra barra de filtros somente quando há 2 ou mais boletos
   const filterBar = document.getElementById('filter-bar');
   if (total > 1) {
     filterBar.classList.remove('hidden');
@@ -877,7 +933,6 @@ function renderBatchResults(reports) {
   const container = document.getElementById('reports-container');
   container.innerHTML = reports
     .map((r) => {
-      // Se for 1 boleto, ou se for Alto Risco, ou se houver até 3 boletos, já abre expandido
       const startExpanded = total <= 3 || r.statusKey === 'danger';
       const quickBank = r.boleto?.bankName || 'Banco não identificado';
       const quickVal =
@@ -980,7 +1035,6 @@ function renderBatchResults(reports) {
   resultSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
-// Abre/fecha relatório individual ao clicar no cabeçalho do card
 window.toggleReportCard = function (headerEl) {
   const body = headerEl.nextElementSibling;
   const indicator = headerEl.querySelector('.toggle-indicator');
@@ -1219,12 +1273,12 @@ function escapeHtml(str) {
 }
 
 function showProgress(title, step, pct = 15) {
-  progressTitle.textContent = title;
-  progressStep.textContent = step;
-  progressFill.style.width = `${pct}%`;
-  auditProgress.classList.remove('hidden');
+  if (progressTitle) progressTitle.textContent = title;
+  if (progressStep) progressStep.textContent = step;
+  if (progressFill) progressFill.style.width = `${pct}%`;
+  if (auditProgress) auditProgress.classList.remove('hidden');
 }
 
 function hideProgress() {
-  auditProgress.classList.add('hidden');
+  if (auditProgress) auditProgress.classList.add('hidden');
 }
