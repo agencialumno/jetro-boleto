@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Verificador de Boletos | Jetro Administradora</title>
+  <link rel="stylesheet" href="style.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="container topbar-inner">
+      <a href="#" class="brand" aria-label="Jetro Administradora">
+        <img
+          src="jetro-removebg-preview.png.webp"
+          alt="Jetro Administradora"
+          class="logo-img"
+        />
+      </a>
+
+      <div class="security-pill">
+        <span class="dot"></span>
+        Análise Local • Nenhum arquivo é armazenado
+      </div>
+    </div>
+  </header>
+
+  <main class="container main-content">
+    <section class="hero">
+      <span class="hero-tag">SEGURANÇA FINANCEIRA • JETRO ADMINISTRADORA</span>
+      <h1>Verificador Oficial de Autenticidade de Boletos</h1>
+      <p>
+        Envie o PDF, uma imagem/print do boleto ou cole a linha digitável. Nosso sistema cruza a matemática FEBRABAN, os metadados do arquivo e o QR Code Pix para identificar indícios de adulteração ou golpe antes do pagamento.
+      </p>
+    </section>
+
+    <section class="card analyzer-card">
+      <div class="tabs" role="tablist">
+        <button type="button" class="tab-btn active" data-tab="upload" role="tab" aria-selected="true">
+          Enviar PDF ou Imagem
+        </button>
+        <button type="button" class="tab-btn" data-tab="line" role="tab" aria-selected="false">
+          Colar Linha Digitável
+        </button>
+      </div>
+
+      <!-- Aba 1: Upload de Arquivo -->
+      <div id="tab-upload" class="tab-panel active">
+        <label for="file-input" id="drop-zone" class="drop-zone">
+          <input type="file" id="file-input" accept=".pdf,image/png,image/jpeg,image/webp" hidden />
+          <div class="drop-icon">
+            <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+              <polyline points="14 2 14 8 20 8"></polyline>
+              <path d="M12 18v-6"></path>
+              <path d="M9 15l3-3 3 3"></path>
+            </svg>
+          </div>
+          <p class="drop-title">Arraste o boleto aqui ou <span>clique para selecionar</span></p>
+          <p class="drop-hint">Aceita arquivos <strong>PDF</strong>, <strong>PNG</strong> ou <strong>JPG</strong> (prints do WhatsApp ou e-mail)</p>
+        </label>
+        <div id="file-preview" class="file-preview hidden"></div>
+      </div>
+
+      <!-- Aba 2: Linha Digitável -->
+      <div id="tab-line" class="tab-panel">
+        <label for="digitable-input" class="input-label">Linha Digitável (47 ou 48 dígitos)</label>
+        <div class="input-row">
+          <input
+            type="text"
+            id="digitable-input"
+            inputmode="numeric"
+            placeholder="Ex: 34191.79001 01043.510047 91020.150008 8 10120000045000"
+            autocomplete="off"
+          />
+          <button type="button" id="btn-verify-line" class="btn-primary">Verificar Agora</button>
+        </div>
+        <div class="demo-actions">
+          <span>Testar ferramenta:</span>
+          <button type="button" id="demo-valid" class="link-btn">Simular boleto íntegro</button>
+          <span>•</span>
+          <button type="button" id="demo-fraud" class="link-btn">Simular boleto adulterado</button>
+        </div>
+      </div>
+
+      <!-- Progresso da Auditoria -->
+      <div id="audit-progress" class="audit-progress hidden">
+        <div class="spinner"></div>
+        <div>
+          <strong id="progress-title">Auditando documento...</strong>
+          <p id="progress-step">Validando dígitos verificadores FEBRABAN...</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Painel de Resultado -->
+    <section id="result-section" class="result-section hidden" aria-live="polite">
+      <div id="verdict-banner" class="verdict-banner">
+        <div class="verdict-badge" id="verdict-badge">ANÁLISE CONCLUÍDA</div>
+        <h2 id="verdict-title">—</h2>
+        <p id="verdict-summary">—</p>
+      </div>
+
+      <div class="grid-2">
+        <!-- Dados Decodificados do Código -->
+        <div class="card detail-card">
+          <div class="card-header">
+            <h3>Raio-X do Código de Barras</h3>
+            <span class="blue-chip">Matemática FEBRABAN</span>
+          </div>
+          <dl class="data-list" id="barcode-data"></dl>
+        </div>
+
+        <!-- Auditoria Forense & Pix -->
+        <div class="card detail-card">
+          <div class="card-header">
+            <h3>Perícia do Arquivo & QR Code Pix</h3>
+            <span class="blue-chip">Integridade</span>
+          </div>
+          <dl class="data-list" id="forensic-data"></dl>
+        </div>
+      </div>
+
+      <!-- Checklist de Alertas e Evidências -->
+      <div class="card checks-card">
+        <h3>Critérios Verificados</h3>
+        <ul id="checks-list" class="checks-list"></ul>
+      </div>
+
+      <!-- Orientação Final no App do Banco -->
+      <div class="card shield-card">
+        <div class="shield-icon">!</div>
+        <div>
+          <h4>Conferência Obrigatória no Aplicativo do Banco</h4>
+          <p>
+            Antes de confirmar a senha no seu banco, verifique se o <strong>Beneficiário Final (CNPJ/Razão Social)</strong> exibido na tela do aplicativo corresponde exatamente à <strong>Jetro Administradora</strong> ou ao condomínio/emissor esperado. Nunca conclua o pagamento se aparecer nome de pessoa física ou empresa desconhecida.
+          </p>
+        </div>
+      </div>
+
+      <div class="reset-row">
+        <button type="button" id="btn-reset" class="btn-secondary">Verificar outro boleto</button>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="container footer-inner">
+      <p><strong>Jetro Administradora</strong> — Ferramenta preventiva de conferência documental.</p>
+      <p class="footer-note">O processamento ocorre integralmente no seu navegador; nenhum dado pessoal ou bancário é enviado ou gravado em servidores externos.</p>
+    </div>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
