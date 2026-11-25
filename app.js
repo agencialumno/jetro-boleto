@@ -365,7 +365,7 @@ function buildUnreadableReport(index, title, reason) {
   };
 }
 
-// Extração resiliente de PDF (com limpeza de cabeçalho, fallback sem Worker e escala adaptativa)
+// Extração resiliente de PDF
 async function extractFromPDF(file) {
   if (!window.pdfjsLib) {
     throw new Error('Biblioteca PDF.js não carregou. Verifique sua conexão com a internet.');
@@ -374,7 +374,6 @@ async function extractFromPDF(file) {
   const rawBuffer = await file.arrayBuffer();
   const rawBytes = new Uint8Array(rawBuffer);
 
-  // Localiza cabeçalho %PDF- caso o servidor bancário tenha inserido bytes extras antes do arquivo
   const marker = [0x25, 0x50, 0x44, 0x46, 0x2d]; // %PDF-
   let startOffset = 0;
   for (let i = 0; i < Math.min(rawBytes.length - 5, 1024); i++) {
@@ -393,7 +392,6 @@ async function extractFromPDF(file) {
   const cleanBytes = startOffset > 0 ? rawBytes.slice(startOffset) : rawBytes;
   const binaryForensics = inspectPdfBinary(cleanBytes.buffer);
 
-  // 1ª tentativa: com Worker | 2ª tentativa (fallback): sem Worker (resolve execução local file:// ou bloqueio de rede)
   let pdf;
   try {
     pdf = await pdfjsLib.getDocument({
@@ -423,7 +421,6 @@ async function extractFromPDF(file) {
     modDate = meta?.info?.ModDate || '';
   } catch (_) {}
 
-  // Extrai texto de até 2 páginas de forma isolada
   let fullText = '';
   const maxPages = Math.min(pdf.numPages, 2);
   for (let i = 1; i <= maxPages; i++) {
@@ -434,7 +431,6 @@ async function extractFromPDF(file) {
     } catch (_) {}
   }
 
-  // Renderiza página 1 com escala adaptativa para não estourar memória do canvas
   let qrPayload = null;
   let visualBarcode44 = null;
   try {
@@ -933,7 +929,8 @@ function renderBatchResults(reports) {
   const container = document.getElementById('reports-container');
   container.innerHTML = reports
     .map((r) => {
-      const startExpanded = total <= 3 || r.statusKey === 'danger';
+      // Inicia recolhido por padrão em todos os resultados; usuário clica para exibir detalhes
+      const startExpanded = false;
       const quickBank = r.boleto?.bankName || 'Banco não identificado';
       const quickVal =
         r.boleto?.amount !== null && r.boleto?.amount !== undefined
