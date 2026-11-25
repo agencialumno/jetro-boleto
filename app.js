@@ -103,8 +103,13 @@ const filePreview = document.getElementById('file-preview');
 const digitableInput = document.getElementById('digitable-input');
 const btnVerifyLine = document.getElementById('btn-verify-line');
 const auditProgress = document.getElementById('audit-progress');
+const progressTitle = document.getElementById('progress-title');
 const progressStep = document.getElementById('progress-step');
+const progressFill = document.getElementById('progress-fill');
 const resultSection = document.getElementById('result-section');
+
+let currentReports = [];
+let activeFilter = 'all';
 
 // Alternância de Abas
 tabBtns.forEach((btn) => {
@@ -121,7 +126,7 @@ tabBtns.forEach((btn) => {
   });
 });
 
-// Eventos Drag & Drop
+// Eventos Drag & Drop (suporte a múltiplos arquivos)
 ['dragenter', 'dragover'].forEach((evt) => {
   dropZone.addEventListener(evt, (e) => {
     e.preventDefault();
@@ -137,38 +142,116 @@ tabBtns.forEach((btn) => {
 });
 
 dropZone.addEventListener('drop', (e) => {
-  const file = e.dataTransfer.files[0];
-  if (file) handleFileUpload(file);
+  const files = Array.from(e.dataTransfer.files || []);
+  if (files.length > 0) handleMultipleFilesUpload(files);
 });
 
 fileInput.addEventListener('change', (e) => {
-  const file = e.target.files[0];
-  if (file) handleFileUpload(file);
+  const files = Array.from(e.target.files || []);
+  if (files.length > 0) handleMultipleFilesUpload(files);
 });
 
+// Verificação de uma ou múltiplas linhas digitáveis
 btnVerifyLine.addEventListener('click', () => {
-  const raw = digitableInput.value.trim();
-  if (!raw) {
-    alert('Cole ou digite a linha digitável do boleto antes de verificar.');
+  const rawText = digitableInput.value.trim();
+  if (!rawText) {
+    alert('Cole ou digite pelo menos uma linha digitável antes de verificar.');
     return;
   }
-  runAudit({ mode: 'line', rawLine: raw });
+
+  const lines = rawText
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+
+  const items = lines.map((line, idx) => ({
+    label: `Linha Digitável #${idx + 1}`,
+    type: 'line',
+    rawLine: line
+  }));
+
+  processBatch(items);
 });
 
 // Botões de Demonstração Rápida
-document.getElementById('demo-valid').addEventListener('click', () => {
-  const sampleValid = '48190.00003 00005.150586 92257.040144 2 16320002419200';
-  digitableInput.value = sampleValid;
-  runAudit({ mode: 'line', rawLine: sampleValid });
+document.getElementById('demo-batch').addEventListener('click', () => {
+  const items = [
+    {
+      label: 'Boleto_Condominio_01.pdf',
+      type: 'simulated',
+      payload: {
+        mode: 'pdf',
+        fileName: 'Boleto_Condominio_01.pdf',
+        rawLine: '48190.00003 00005.150586 92257.040144 2 16320002419200',
+        text: 'Superlogica 481-2 CONDOMINIO PONTOES DA BARRA CNPJ: 29.279.239/0001-24 Vencimento 16/11/2026 Valor do documento 24.192,00',
+        producer: 'wkhtmltopdf 0.12.6',
+        creator: 'Superlogica',
+        binaryForensics: { eofCount: 1, hasIncrementalPrev: false, hasOverlayAnnotations: false }
+      }
+    },
+    {
+      label: 'Boleto_Cota_Extra_02.pdf',
+      type: 'simulated',
+      payload: {
+        mode: 'line',
+        rawLine: '63390.00116 12455.479605 06344.165664 8 16320002419200'
+      }
+    },
+    {
+      label: 'Boleto_Adulterado_03.pdf',
+      type: 'simulated',
+      payload: {
+        mode: 'pdf',
+        fileName: 'Boleto_Adulterado_03.pdf',
+        rawLine: '26091.09008 63571.277308 71444.640009 1 13500000085000',
+        text: 'Banco Itaú S.A. - CNPJ 12.345.678/0001-90 - Valor do documento 420,00 - Condomínio Residencial',
+        producer: 'PDFium',
+        creator: 'PDFium',
+        binaryForensics: { eofCount: 2, hasIncrementalPrev: true, hasOverlayAnnotations: true }
+      }
+    }
+  ];
+  processBatch(items);
 });
 
 document.getElementById('demo-fraud').addEventListener('click', () => {
   const sampleFraud = '26091.09008 63571.277308 71444.640009 1 13500000085000';
   digitableInput.value = sampleFraud;
-  runAudit({
-    mode: 'line',
-    rawLine: sampleFraud,
-    simulatedDocText: 'Banco Itaú S.A. - CNPJ 12.345.678/0001-90 - Valor do documento 420,00 - Condomínio Residencial'
+  processBatch([
+    {
+      label: 'Simulação de Boleto Adulterado',
+      type: 'simulated',
+      payload: {
+        mode: 'line',
+        rawLine: sampleFraud,
+        simulatedDocText: 'Banco Itaú S.A. - CNPJ 12.345.678/0001-90 - Valor do documento 420,00 - Condomínio Residencial'
+      }
+    }
+  ]);
+});
+
+// Filtros e Expandir/Recolher
+document.querySelectorAll('.filter-btn').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.filter-btn').forEach((b) => b.classList.remove('active'));
+    btn.classList.add('active');
+    activeFilter = btn.dataset.filter;
+    applyFilter();
+  });
+});
+
+document.getElementById('btn-toggle-all').addEventListener('click', () => {
+  const bodies = document.querySelectorAll('.report-body');
+  const hasCollapsed = Array.from(bodies).some((b) => b.classList.contains('collapsed'));
+  bodies.forEach((b) => {
+    if (hasCollapsed) {
+      b.classList.remove('collapsed');
+    } else {
+      b.classList.add('collapsed');
+    }
+  });
+  document.querySelectorAll('.toggle-indicator').forEach((el) => {
+    el.textContent = hasCollapsed ? 'Ocultar' : 'Detalhes';
   });
 });
 
@@ -177,49 +260,111 @@ document.getElementById('btn-reset').addEventListener('click', () => {
   filePreview.classList.add('hidden');
   fileInput.value = '';
   digitableInput.value = '';
+  currentReports = [];
   window.scrollTo({ top: 0, behavior: 'smooth' });
 });
 
-// Processamento de Arquivo (PDF ou Imagem)
-async function handleFileUpload(file) {
+// Upload de múltiplos arquivos
+function handleMultipleFilesUpload(files) {
   filePreview.classList.remove('hidden');
-  filePreview.innerHTML = `<span>Arquivo selecionado: <strong>${escapeHtml(file.name)}</strong> (${(file.size / 1024).toFixed(1)} KB)</span>`;
+  filePreview.innerHTML = `
+    <strong>${files.length} ${files.length === 1 ? 'arquivo selecionado' : 'arquivos selecionados'}:</strong>
+    <div class="file-preview-tags">
+      ${files.map((f) => `<span class="file-chip">${escapeHtml(f.name)} (${(f.size / 1024).toFixed(0)} KB)</span>`).join('')}
+    </div>
+  `;
 
-  showProgress('Executando perícia binária, leitura das barras e QR Code...');
+  const items = files.map((file) => ({
+    label: file.name,
+    type: 'file',
+    file
+  }));
 
-  try {
-    if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
-      const pdfData = await extractFromPDF(file);
-      await runAudit({
-        mode: 'pdf',
-        fileName: file.name,
-        ...pdfData
-      });
-    } else if (file.type.startsWith('image/')) {
-      const imgData = await extractFromImage(file);
-      await runAudit({
-        mode: 'image',
-        fileName: file.name,
-        ...imgData
-      });
-    } else {
-      hideProgress();
-      alert('Formato não suportado. Envie um arquivo PDF, PNG ou JPG.');
-    }
-  } catch (err) {
-    console.error(err);
-    hideProgress();
-    alert('Não foi possível ler este arquivo. Verifique se o PDF não está protegido por senha ou tente enviar um print da tela.');
-  }
+  processBatch(items);
 }
 
+// Processamento em Lote com Relatórios Separados
+async function processBatch(items) {
+  const reports = [];
+  const total = items.length;
+
+  showProgress(`Auditando ${total} ${total === 1 ? 'boleto' : 'boletos'}...`, 'Iniciando verificação...', 5);
+
+  for (let i = 0; i < total; i++) {
+    const item = items[i];
+    const pct = Math.round(((i + 0.5) / total) * 100);
+    showProgress(
+      `Auditando ${i + 1} de ${total}...`,
+      `Analisando: ${item.label}`,
+      pct
+    );
+
+    try {
+      let payload;
+      if (item.type === 'file') {
+        const file = item.file;
+        if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
+          const pdfData = await extractFromPDF(file);
+          payload = { mode: 'pdf', fileName: file.name, ...pdfData };
+        } else if (file.type.startsWith('image/')) {
+          const imgData = await extractFromImage(file);
+          payload = { mode: 'image', fileName: file.name, ...imgData };
+        } else {
+          reports.push(buildUnreadableReport(i + 1, file.name, 'Formato de arquivo não suportado. Use PDF, PNG ou JPG.'));
+          continue;
+        }
+      } else if (item.type === 'line') {
+        payload = { mode: 'line', fileName: item.label, rawLine: item.rawLine };
+      } else {
+        payload = { ...item.payload, fileName: item.label };
+      }
+
+      const report = evaluateSingleBoleto(i + 1, item.label, payload);
+      reports.push(report);
+    } catch (err) {
+      console.error(err);
+      reports.push(
+        buildUnreadableReport(
+          i + 1,
+          item.label,
+          'Não foi possível ler este arquivo (pode estar corrompido ou protegido por senha).'
+        )
+      );
+    }
+  }
+
+  showProgress('Concluído!', 'Gerando relatórios individuais...', 100);
+  await new Promise((r) => setTimeout(r, 250));
+  hideProgress();
+
+  currentReports = reports;
+  activeFilter = 'all';
+  document.querySelectorAll('.filter-btn').forEach((b) => b.classList.remove('active'));
+  document.querySelector('.filter-btn[data-filter="all"]').classList.add('active');
+
+  renderBatchResults(reports);
+}
+
+function buildUnreadableReport(index, title, reason) {
+  return {
+    index,
+    title,
+    statusKey: 'warning',
+    statusBadge: 'ATENÇÃO • NÃO LIDO',
+    verdictTitle: 'Não foi possível extrair os dados deste item',
+    verdictSummary: reason,
+    boleto: null,
+    pix: null,
+    payload: { fileName: title, mode: 'error' },
+    checks: [{ status: 'warn', text: reason }],
+    riskPoints: 20
+  };
+}
+
+// Extração de PDF
 async function extractFromPDF(file) {
   const arrayBuffer = await file.arrayBuffer();
-
-  // 1. Inspeção forense na estrutura bruta do PDF
   const binaryForensics = inspectPdfBinary(arrayBuffer);
-
-  // 2. Carrega documento via PDF.js
   const pdf = await pdfjsLib.getDocument({ data: arrayBuffer.slice(0) }).promise;
 
   let producer = '';
@@ -234,7 +379,6 @@ async function extractFromPDF(file) {
     modDate = meta?.info?.ModDate || '';
   } catch (_) {}
 
-  // Extrai texto de até 2 páginas
   let fullText = '';
   const maxPages = Math.min(pdf.numPages, 2);
   for (let i = 1; i <= maxPages; i++) {
@@ -243,7 +387,6 @@ async function extractFromPDF(file) {
     fullText += ' ' + content.items.map((item) => item.str).join(' ');
   }
 
-  // Renderiza página 1 em alta resolução (3.0x) para ler QR Code Pix e barras ITF-25
   const page1 = await pdf.getPage(1);
   const viewport = page1.getViewport({ scale: 3.0 });
   const canvas = document.createElement('canvas');
@@ -267,6 +410,7 @@ async function extractFromPDF(file) {
   };
 }
 
+// Extração de Imagem
 function extractFromImage(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -302,7 +446,6 @@ function extractFromImage(file) {
 // Inspeção forense da estrutura interna do arquivo PDF
 function inspectPdfBinary(arrayBuffer) {
   const rawStr = new TextDecoder('latin1').decode(new Uint8Array(arrayBuffer));
-
   const eofMatches = rawStr.match(/%%EOF/g) || [];
   const eofCount = eofMatches.length;
   const hasIncrementalPrev = /\/Prev\s+\d+/.test(rawStr);
@@ -315,7 +458,7 @@ function inspectPdfBinary(arrayBuffer) {
   };
 }
 
-// Decodificador Óptico das Barras do Código de Barras (Interleaved 2 of 5 - FEBRABAN)
+// Decodificador Óptico das Barras ITF-25
 function decodeITFBarcodeFromCanvas(ctx, width, height) {
   const ITF_PATTERNS = {
     '00110': '0',
@@ -398,7 +541,7 @@ function decodeITFBarcodeFromCanvas(ctx, width, height) {
   return null;
 }
 
-// Varre a página inteira e recortes estratégicos para localizar QR Codes
+// Varre regiões para localizar QR Code Pix
 function scanCanvasForQR(ctx, width, height) {
   if (!window.jsQR) return null;
 
@@ -430,28 +573,24 @@ function getFormattedSoftwareName(producer, creator) {
   return p || c;
 }
 
-// Orquestrador da Auditoria
-async function runAudit(payload) {
-  showProgress('Validando estrutura matemática FEBRABAN e perícia do arquivo...');
-  await new Promise((r) => setTimeout(r, 450));
-
+// Avalia um único boleto e retorna objeto estruturado de relatório
+function evaluateSingleBoleto(index, title, payload) {
   const checks = [];
   let riskPoints = 0;
 
-  let rawLine = payload.rawLine || extractDigitableLineFromText(payload.text || '');
+  const rawLine = payload.rawLine || extractDigitableLineFromText(payload.text || '');
   const textContent = payload.text || payload.simulatedDocText || '';
   const boleto = rawLine ? parseBoleto(rawLine) : null;
   const pix = payload.qrPayload ? parsePixEMV(payload.qrPayload) : null;
 
   if (!boleto && !pix && !payload.visualBarcode44) {
-    hideProgress();
-    alert(
-      'Não identificamos uma linha digitável ou QR Code Pix legível neste arquivo. Se for uma imagem/scan sem texto selecionável, cole a linha digitável na aba ao lado.'
+    return buildUnreadableReport(
+      index,
+      title,
+      'Não foi identificada uma linha digitável ou QR Code Pix legível neste item.'
     );
-    return;
   }
 
-  // Avaliação da Linha Digitável
   if (boleto) {
     if (boleto.validMath) {
       checks.push({
@@ -466,7 +605,6 @@ async function runAudit(payload) {
       });
     }
 
-    // Cruzamento entre o código de barras gráfico e a linha digitável escrita
     if (payload.visualBarcode44 && boleto.barcode44) {
       if (payload.visualBarcode44 !== boleto.barcode44) {
         riskPoints += 70;
@@ -482,7 +620,6 @@ async function runAudit(payload) {
       }
     }
 
-    // Cruzamento Banco do Código vs. Banco impresso no PDF
     if (textContent && boleto.bankCode) {
       const mentionedBank = detectBankInText(textContent);
       if (mentionedBank && mentionedBank.code !== boleto.bankCode) {
@@ -499,7 +636,6 @@ async function runAudit(payload) {
       }
     }
 
-    // Cruzamento Valor do Código vs. Valor impresso no PDF
     if (textContent && boleto.amount !== null) {
       const printedAmounts = extractMoneyValues(textContent);
       if (printedAmounts.length > 0 && !printedAmounts.some((v) => Math.abs(v - boleto.amount) < 0.02)) {
@@ -516,7 +652,6 @@ async function runAudit(payload) {
       }
     }
 
-    // Cruzamento Vencimento do Código vs. Data impressa no PDF
     if (textContent && boleto.dueDate) {
       const printedDates = extractDatesFromText(textContent);
       if (printedDates.length > 0 && printedDates.includes(boleto.dueDate)) {
@@ -534,7 +669,6 @@ async function runAudit(payload) {
     });
   }
 
-  // Perícia Forense do PDF (Metadados, Salvamento Incremental e Datas)
   if (payload.mode === 'pdf') {
     const softwareRaw = getFormattedSoftwareName(payload.producer, payload.creator);
     const softwareLower = softwareRaw.toLowerCase();
@@ -566,7 +700,6 @@ async function runAudit(payload) {
       });
     }
 
-    // Verifica salvamento incremental
     if (payload.binaryForensics) {
       if (payload.binaryForensics.eofCount > 1 || payload.binaryForensics.hasIncrementalPrev) {
         riskPoints += 55;
@@ -590,7 +723,6 @@ async function runAudit(payload) {
       }
     }
 
-    // Verifica diferença entre CreationDate e ModDate
     if (payload.creationDate && payload.modDate && payload.creationDate !== payload.modDate) {
       riskPoints += 45;
       checks.push({
@@ -600,7 +732,6 @@ async function runAudit(payload) {
     }
   }
 
-  // Avaliação de CNPJ impresso no texto
   const cnpjsFound = extractCNPJsFromText(textContent);
   if (cnpjsFound.length > 0) {
     const invalidCnpj = cnpjsFound.find((c) => !validateCNPJ(c));
@@ -618,7 +749,6 @@ async function runAudit(payload) {
     }
   }
 
-  // Avaliação do QR Code Pix (Boleto Híbrido)
   if (pix) {
     if (/qr\s*code\s*indispon[íi]vel/i.test(textContent)) {
       riskPoints += 70;
@@ -642,7 +772,6 @@ async function runAudit(payload) {
     }
   }
 
-  // Alerta de termos de engenharia social / falso protesto
   if (/protesto em cart[óo]rio|bloqueio judicial|taxa associativa|atualiza[çc][ãa]o cadastral/i.test(textContent)) {
     riskPoints += 25;
     checks.push({
@@ -658,83 +787,217 @@ async function runAudit(payload) {
     });
   }
 
-  hideProgress();
-  renderResults({ boleto, pix, payload, checks, riskPoints });
-}
-
-// Renderiza painel de resultados
-function renderResults({ boleto, pix, payload, checks, riskPoints }) {
-  const banner = document.getElementById('verdict-banner');
-  const badge = document.getElementById('verdict-badge');
-  const title = document.getElementById('verdict-title');
-  const summary = document.getElementById('verdict-summary');
-
-  banner.className = 'verdict-banner';
+  let statusKey = 'safe';
+  let statusBadge = 'ÍNDICES CONSISTENTES';
+  let verdictTitle = 'Nenhuma inconsistência estrutural detectada';
+  let verdictSummary =
+    'A matemática FEBRABAN, os valores e a integridade do arquivo estão alinhados. Faça apenas a conferência final do CNPJ no aplicativo bancário.';
 
   if (riskPoints >= 40) {
-    banner.classList.add('danger');
-    badge.textContent = 'ALTO RISCO • INDÍCIOS DE ADULTERAÇÃO';
-    title.textContent = 'Não pague este boleto sem validação direta';
-    summary.textContent =
+    statusKey = 'danger';
+    statusBadge = 'ALTO RISCO • INDÍCIOS DE ADULTERAÇÃO';
+    verdictTitle = 'Não pague este boleto sem validação direta';
+    verdictSummary =
       'Foram encontradas inconsistências estruturais no PDF, divergências entre o documento e o código de barras ou sinais de edição posterior à emissão.';
   } else if (riskPoints > 0 || payload.mode === 'line') {
-    banner.classList.add('warning');
-    badge.textContent = 'ATENÇÃO • CONFERÊNCIA RECOMENDADA';
-    title.textContent = 'Estrutura numérica válida, mas exige conferência no banco';
-    summary.textContent =
+    statusKey = 'warning';
+    statusBadge = 'ATENÇÃO • CONFERÊNCIA RECOMENDADA';
+    verdictTitle = 'Estrutura numérica válida, mas exige conferência no banco';
+    verdictSummary =
       'Os dígitos verificadores estão corretos, porém há pontos de atenção que exigem confirmação do beneficiário na tela do banco.';
-  } else {
-    banner.classList.add('safe');
-    badge.textContent = 'ÍNDICES CONSISTENTES';
-    title.textContent = 'Nenhuma inconsistência estrutural detectada';
-    summary.textContent =
-      'A matemática FEBRABAN, os valores e a integridade do arquivo estão alinhados. Faça apenas a conferência final do CNPJ no aplicativo bancário.';
   }
 
-  const barcodeEl = document.getElementById('barcode-data');
-  if (boleto) {
-    barcodeEl.innerHTML = `
-      <div class="data-row"><dt>Modalidade</dt><dd>${boleto.typeLabel}</dd></div>
-      <div class="data-row"><dt>Banco Emissor</dt><dd>${boleto.bankCode ? `${boleto.bankCode} — ${boleto.bankName}` : 'Arrecadação / Convênio'}</dd></div>
-      <div class="data-row"><dt>Valor Codificado</dt><dd>${boleto.amount !== null ? formatBRL(boleto.amount) : 'Valor variável / não fixado'}</dd></div>
-      <div class="data-row"><dt>Vencimento</dt><dd>${boleto.dueDate || 'Contra apresentação / não informado'}</dd></div>
-      <div class="data-row"><dt>Integridade Matemática</dt><dd>${boleto.validMath ? 'Válida (Módulo 10/11)' : 'Adulterada / Inválida'}</dd></div>
-    `;
-  } else {
-    barcodeEl.innerHTML = `<div class="data-row"><dt>Linha Digitável</dt><dd>Não detectada no arquivo</dd></div>`;
-  }
+  return {
+    index,
+    title,
+    statusKey,
+    statusBadge,
+    verdictTitle,
+    verdictSummary,
+    boleto,
+    pix,
+    payload,
+    checks,
+    riskPoints
+  };
+}
 
-  const forensicEl = document.getElementById('forensic-data');
-  const softwareDisplay = getFormattedSoftwareName(payload.producer, payload.creator) || 'Não informado / Removido';
-  const eofInfo =
-    payload.binaryForensics && payload.binaryForensics.eofCount > 1
-      ? `Editado (${payload.binaryForensics.eofCount} revisões)`
-      : payload.mode === 'pdf'
-      ? 'Original (1 revisão)'
-      : 'Não aplicável';
+// Renderiza o painel consolidado e todos os relatórios individuais separados
+function renderBatchResults(reports) {
+  const total = reports.length;
+  const dangerCount = reports.filter((r) => r.statusKey === 'danger').length;
+  const warningCount = reports.filter((r) => r.statusKey === 'warning').length;
+  const safeCount = reports.filter((r) => r.statusKey === 'safe').length;
 
-  forensicEl.innerHTML = `
-    <div class="data-row"><dt>Origem da Análise</dt><dd>${payload.fileName ? escapeHtml(payload.fileName) : 'Linha digitável colada'}</dd></div>
-    <div class="data-row"><dt>Software Gerador (PDF)</dt><dd>${escapeHtml(softwareDisplay)}</dd></div>
-    <div class="data-row"><dt>Estrutura do PDF</dt><dd>${eofInfo}</dd></div>
-    <div class="data-row"><dt>QR Code Pix</dt><dd>${pix ? 'Detectado e decodificado' : 'Não encontrado'}</dd></div>
-    <div class="data-row"><dt>Recebedor no QR Pix</dt><dd>${pix ? escapeHtml(pix.merchantName || 'Não informado') : '—'}</dd></div>
+  const totalAmount = reports.reduce((acc, r) => {
+    const val = r.boleto?.amount ?? r.pix?.amount ?? 0;
+    return acc + val;
+  }, 0);
+
+  document.getElementById('batch-title').textContent =
+    total === 1
+      ? 'Relatório Individual de Auditoria'
+      : `Relatório Consolidado — ${total} Boletos Analisados`;
+
+  document.getElementById('batch-subtitle').textContent =
+    dangerCount > 0
+      ? `Atenção: ${dangerCount} ${dangerCount === 1 ? 'boleto apresentou' : 'boletos apresentaram'} indícios graves de adulteração.`
+      : 'Nenhum indício crítico de fraude estrutural encontrado no lote.';
+
+  document.getElementById('batch-total-amount').textContent = formatBRL(totalAmount);
+
+  document.getElementById('batch-stats').innerHTML = `
+    <div class="stat-box danger">
+      <span>Alto Risco / Adulterado</span>
+      <strong>${dangerCount}</strong>
+    </div>
+    <div class="stat-box warning">
+      <span>Atenção / Conferir Banco</span>
+      <strong>${warningCount}</strong>
+    </div>
+    <div class="stat-box safe">
+      <span>Índices Consistentes</span>
+      <strong>${safeCount}</strong>
+    </div>
   `;
 
-  const checksList = document.getElementById('checks-list');
-  checksList.innerHTML = checks
-    .map(
-      (c) => `
-      <li class="check-item">
-        <span class="check-tag ${c.status}">${c.status === 'ok' ? 'OK' : c.status === 'warn' ? 'ATENÇÃO' : 'ALERTA'}</span>
-        <span>${escapeHtml(c.text)}</span>
-      </li>
-    `
-    )
+  document.getElementById('count-all').textContent = total;
+  document.getElementById('count-danger').textContent = dangerCount;
+  document.getElementById('count-warning').textContent = warningCount;
+  document.getElementById('count-safe').textContent = safeCount;
+
+  // Mostra barra de filtros somente quando há 2 ou mais boletos
+  const filterBar = document.getElementById('filter-bar');
+  if (total > 1) {
+    filterBar.classList.remove('hidden');
+  } else {
+    filterBar.classList.add('hidden');
+  }
+
+  const container = document.getElementById('reports-container');
+  container.innerHTML = reports
+    .map((r) => {
+      // Se for 1 boleto, ou se for Alto Risco, ou se houver até 3 boletos, já abre expandido
+      const startExpanded = total <= 3 || r.statusKey === 'danger';
+      const quickBank = r.boleto?.bankName || 'Banco não identificado';
+      const quickVal =
+        r.boleto?.amount !== null && r.boleto?.amount !== undefined
+          ? formatBRL(r.boleto.amount)
+          : r.pix?.amount
+          ? formatBRL(r.pix.amount)
+          : 'Valor não fixado';
+      const quickDue = r.boleto?.dueDate ? `Venc. ${r.boleto.dueDate}` : 'Sem vencimento fixo';
+
+      const barcodeHtml = r.boleto
+        ? `
+          <div class="data-row"><dt>Modalidade</dt><dd>${r.boleto.typeLabel}</dd></div>
+          <div class="data-row"><dt>Banco Emissor</dt><dd>${r.boleto.bankCode ? `${r.boleto.bankCode} — ${r.boleto.bankName}` : 'Arrecadação / Convênio'}</dd></div>
+          <div class="data-row"><dt>Valor Codificado</dt><dd>${r.boleto.amount !== null ? formatBRL(r.boleto.amount) : 'Valor variável / não fixado'}</dd></div>
+          <div class="data-row"><dt>Vencimento</dt><dd>${r.boleto.dueDate || 'Contra apresentação / não informado'}</dd></div>
+          <div class="data-row"><dt>Integridade Matemática</dt><dd>${r.boleto.validMath ? 'Válida (Módulo 10/11)' : 'Adulterada / Inválida'}</dd></div>
+        `
+        : `<div class="data-row"><dt>Linha Digitável</dt><dd>Não detectada no arquivo</dd></div>`;
+
+      const softwareDisplay =
+        getFormattedSoftwareName(r.payload.producer, r.payload.creator) || 'Não informado / Removido';
+      const eofInfo =
+        r.payload.binaryForensics && r.payload.binaryForensics.eofCount > 1
+          ? `Editado (${r.payload.binaryForensics.eofCount} revisões)`
+          : r.payload.mode === 'pdf'
+          ? 'Original (1 revisão)'
+          : 'Não aplicável';
+
+      const forensicHtml = `
+        <div class="data-row"><dt>Documento / Origem</dt><dd>${escapeHtml(r.title)}</dd></div>
+        <div class="data-row"><dt>Software Gerador (PDF)</dt><dd>${escapeHtml(softwareDisplay)}</dd></div>
+        <div class="data-row"><dt>Estrutura do PDF</dt><dd>${eofInfo}</dd></div>
+        <div class="data-row"><dt>QR Code Pix</dt><dd>${r.pix ? 'Detectado e decodificado' : 'Não encontrado'}</dd></div>
+        <div class="data-row"><dt>Recebedor no QR Pix</dt><dd>${r.pix ? escapeHtml(r.pix.merchantName || 'Não informado') : '—'}</dd></div>
+      `;
+
+      const checksHtml = r.checks
+        .map(
+          (c) => `
+          <li class="check-item">
+            <span class="check-tag ${c.status}">${c.status === 'ok' ? 'OK' : c.status === 'warn' ? 'ATENÇÃO' : 'ALERTA'}</span>
+            <span>${escapeHtml(c.text)}</span>
+          </li>
+        `
+        )
+        .join('');
+
+      return `
+        <article class="report-card status-${r.statusKey}" data-status="${r.statusKey}">
+          <div class="report-header" onclick="toggleReportCard(this)">
+            <div class="report-title-group">
+              <span class="report-index">#${r.index}</span>
+              <div class="report-name-wrap">
+                <div class="report-name">${escapeHtml(r.title)}</div>
+                <div class="report-quick-meta">${escapeHtml(quickBank)} • <strong>${quickVal}</strong> • ${quickDue}</div>
+              </div>
+            </div>
+            <div class="report-right">
+              <span class="status-pill ${r.statusKey}">${r.statusBadge}</span>
+              <span class="toggle-indicator">${startExpanded ? 'Ocultar' : 'Detalhes'}</span>
+            </div>
+          </div>
+
+          <div class="report-body ${startExpanded ? '' : 'collapsed'}">
+            <div class="verdict-box ${r.statusKey}">
+              <h3>${r.verdictTitle}</h3>
+              <p>${r.verdictSummary}</p>
+            </div>
+
+            <div class="grid-2">
+              <div class="sub-panel">
+                <div class="sub-panel-header">
+                  <h4>Raio-X do Código de Barras</h4>
+                  <span class="blue-chip">Matemática FEBRABAN</span>
+                </div>
+                <dl class="data-list">${barcodeHtml}</dl>
+              </div>
+
+              <div class="sub-panel">
+                <div class="sub-panel-header">
+                  <h4>Perícia do Arquivo & QR Code Pix</h4>
+                  <span class="blue-chip">Integridade</span>
+                </div>
+                <dl class="data-list">${forensicHtml}</dl>
+              </div>
+            </div>
+
+            <div class="checks-box">
+              <h4>Critérios Verificados neste Boleto</h4>
+              <ul class="checks-list">${checksHtml}</ul>
+            </div>
+          </div>
+        </article>
+      `;
+    })
     .join('');
 
   resultSection.classList.remove('hidden');
   resultSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// Abre/fecha relatório individual ao clicar no cabeçalho do card
+window.toggleReportCard = function (headerEl) {
+  const body = headerEl.nextElementSibling;
+  const indicator = headerEl.querySelector('.toggle-indicator');
+  const isCollapsed = body.classList.toggle('collapsed');
+  if (indicator) {
+    indicator.textContent = isCollapsed ? 'Detalhes' : 'Ocultar';
+  }
+};
+
+function applyFilter() {
+  document.querySelectorAll('.report-card').forEach((card) => {
+    if (activeFilter === 'all' || card.dataset.status === activeFilter) {
+      card.classList.remove('hidden');
+    } else {
+      card.classList.add('hidden');
+    }
+  });
 }
 
 /* ==================== FUNÇÕES MATEMÁTICAS FEBRABAN & PIX ==================== */
@@ -955,8 +1218,10 @@ function escapeHtml(str) {
     .replace(/"/g, '&quot;');
 }
 
-function showProgress(msg) {
-  progressStep.textContent = msg;
+function showProgress(title, step, pct = 15) {
+  progressTitle.textContent = title;
+  progressStep.textContent = step;
+  progressFill.style.width = `${pct}%`;
   auditProgress.classList.remove('hidden');
 }
 
