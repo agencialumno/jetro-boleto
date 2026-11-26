@@ -38,21 +38,25 @@ const BANCOS_BR = {
   '756': 'Sicoob'
 };
 
-// Softwares de edição manual / reimpressão suspeitos em boletos
-const EDITORES_SUSPEITOS = [
+// Editores puramente gráficos (nunca usados apenas para reorganizar páginas de boleto)
+const EDITORES_GRAFICOS = [
+  'canva',
+  'photoshop',
+  'corel',
+  'gimp',
+  'inkscape'
+];
+
+// Ferramentas comuns de reorganização/reimpressão de PDF (podem ser benignas se os dados estiverem intactos)
+const FERRAMENTAS_REORGANIZACAO = [
   'pdfium',
   'acrobat',
   'adobe',
   'foxit',
   'nitro',
   'pdf-xchange',
-  'canva',
   'ilovepdf',
   'smallpdf',
-  'photoshop',
-  'corel',
-  'gimp',
-  'inkscape',
   'sejda',
   'pdfescape',
   'pdfsam',
@@ -186,8 +190,8 @@ if (demoBatchBtn) {
           fileName: 'Boleto_Condominio_01.pdf',
           rawLine: '48190.00003 00005.150586 92257.040144 2 16320002419200',
           text: 'Superlogica 481-2 CONDOMINIO PONTOES DA BARRA CNPJ: 29.279.239/0001-24 Vencimento 16/11/2026 Valor do documento 24.192,00',
-          producer: 'wkhtmltopdf 0.12.6',
-          creator: 'Superlogica',
+          producer: 'PDFsam Basic',
+          creator: 'PDFsam Basic',
           binaryForensics: { eofCount: 1, hasIncrementalPrev: false, hasOverlayAnnotations: false }
         }
       },
@@ -497,12 +501,13 @@ function extractFromImage(file) {
 }
 
 // Inspeção forense da estrutura interna do arquivo PDF
+// Foca em remendos/sobreposições visuais (/Stamp, /FreeText, /Square, /Ink) e ignora /Widget nativos de formulários bancários
 function inspectPdfBinary(arrayBuffer) {
   const rawStr = new TextDecoder('latin1').decode(new Uint8Array(arrayBuffer));
   const eofMatches = rawStr.match(/%%EOF/g) || [];
   const eofCount = eofMatches.length;
   const hasIncrementalPrev = /\/Prev\s+\d+/.test(rawStr);
-  const hasOverlayAnnotations = /\/Subtype\s*\/(Stamp|FreeText|Square|Ink|Widget)/.test(rawStr);
+  const hasOverlayAnnotations = /\/Subtype\s*\/(Stamp|FreeText|Square|Ink|Highlight|Redact)/.test(rawStr);
 
   return {
     eofCount,
@@ -626,10 +631,31 @@ function getFormattedSoftwareName(producer, creator) {
   return p || c;
 }
 
+function normalizeStr(str) {
+  return String(str || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+}
+
+// Verifica se o nome do recebedor no QR Code Pix guarda relação com o documento impresso
+function pixRecipientMatchesText(merchantName, textContent) {
+  if (!merchantName || !textContent) return true;
+  const normDoc = normalizeStr(textContent);
+  const words = normalizeStr(merchantName)
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter((w) => w.length >= 4 && !['ltda', 'eireli', 'pagamentos', 'condominio', 'brasil'].includes(w));
+
+  if (words.length === 0) return true;
+  return words.some((w) => normDoc.includes(w));
+}
+
 // Avalia um único boleto
 function evaluateSingleBoleto(index, title, payload) {
   const checks = [];
   let riskPoints = 0;
+  let contentTampered = false;
 
   const rawLine = payload.rawLine || extractDigitableLineFromText(payload.text || '');
   const textContent = payload.text || payload.simulatedDocText || '';
@@ -644,6 +670,7 @@ function evaluateSingleBoleto(index, title, payload) {
     );
   }
 
+  // 1. Validação Matemática FEBRABAN e Cruzamento de Dados
   if (boleto) {
     if (boleto.validMath) {
       checks.push({
@@ -652,6 +679,7 @@ function evaluateSingleBoleto(index, title, payload) {
       });
     } else {
       riskPoints += 50;
+      contentTampered = true;
       checks.push({
         status: 'fail',
         text: 'Dígito verificador inválido! A sequência numérica foi alterada ou digitada incorretamente.'
@@ -661,6 +689,7 @@ function evaluateSingleBoleto(index, title, payload) {
     if (payload.visualBarcode44 && boleto.barcode44) {
       if (payload.visualBarcode44 !== boleto.barcode44) {
         riskPoints += 70;
+        contentTampered = true;
         checks.push({
           status: 'fail',
           text: 'FRAUDE DETECTADA: As barras gráficas do código de barras não correspondem à linha digitável escrita no boleto (imagem adulterada sobreposta).'
@@ -677,6 +706,7 @@ function evaluateSingleBoleto(index, title, payload) {
       const mentionedBank = detectBankInText(textContent);
       if (mentionedBank && mentionedBank.code !== boleto.bankCode) {
         riskPoints += 50;
+        contentTampered = true;
         checks.push({
           status: 'fail',
           text: `Divergência grave de banco: o texto do documento cita "${mentionedBank.name}", mas o código de barras pertence a "${boleto.bankName}" (${boleto.bankCode}).`
@@ -693,6 +723,7 @@ function evaluateSingleBoleto(index, title, payload) {
       const printedAmounts = extractMoneyValues(textContent);
       if (printedAmounts.length > 0 && !printedAmounts.some((v) => Math.abs(v - boleto.amount) < 0.02)) {
         riskPoints += 45;
+        contentTampered = true;
         checks.push({
           status: 'fail',
           text: `Divergência de valor: o código de barras cobra ${formatBRL(boleto.amount)}, mas esse valor não corresponde aos valores impressos no documento.`
@@ -722,74 +753,13 @@ function evaluateSingleBoleto(index, title, payload) {
     });
   }
 
-  if (payload.mode === 'pdf') {
-    const softwareRaw = getFormattedSoftwareName(payload.producer, payload.creator);
-    const softwareLower = softwareRaw.toLowerCase();
-    const suspiciousTool = EDITORES_SUSPEITOS.find((tool) => softwareLower.includes(tool));
-    const isKnownAutomated = GERADORES_AUTOMATIZADOS.some((gen) => softwareLower.includes(gen));
-
-    if (suspiciousTool) {
-      riskPoints += 55;
-      checks.push({
-        status: 'fail',
-        text: `PDF modificado ou regravado por editor/navegador (${softwareRaw}), padrão típico de boletos adulterados.`
-      });
-    } else if (!softwareRaw) {
-      riskPoints += 40;
-      checks.push({
-        status: 'fail',
-        text: 'Metadados de origem do PDF ausentes ou removidos — boletos bancários legítimos identificam o sistema gerador.'
-      });
-    } else if (isKnownAutomated) {
-      checks.push({
-        status: 'ok',
-        text: `Motor de emissão automatizado identificado (${softwareRaw}).`
-      });
-    } else {
-      riskPoints += 25;
-      checks.push({
-        status: 'warn',
-        text: `Gerador de PDF não reconhecido na lista de sistemas bancários (${softwareRaw}).`
-      });
-    }
-
-    if (payload.binaryForensics) {
-      if (payload.binaryForensics.eofCount > 1 || payload.binaryForensics.hasIncrementalPrev) {
-        riskPoints += 55;
-        checks.push({
-          status: 'fail',
-          text: `Adulteração estrutural no PDF: o arquivo possui ${payload.binaryForensics.eofCount} camadas de salvamento (edição incremental após a emissão original).`
-        });
-      } else {
-        checks.push({
-          status: 'ok',
-          text: 'Estrutura interna íntegra: arquivo possui camada única de gravação (sem edições posteriores).'
-        });
-      }
-
-      if (payload.binaryForensics.hasOverlayAnnotations) {
-        riskPoints += 45;
-        checks.push({
-          status: 'fail',
-          text: 'Foram detectados objetos/carimbos sobrepostos na camada de anotações do PDF.'
-        });
-      }
-    }
-
-    if (payload.creationDate && payload.modDate && payload.creationDate !== payload.modDate) {
-      riskPoints += 45;
-      checks.push({
-        status: 'fail',
-        text: 'A data de modificação do PDF é diferente da data de emissão original, indicando alteração posterior.'
-      });
-    }
-  }
-
+  // 2. Validação de CNPJ impresso
   const cnpjsFound = extractCNPJsFromText(textContent);
   if (cnpjsFound.length > 0) {
     const invalidCnpj = cnpjsFound.find((c) => !validateCNPJ(c));
     if (invalidCnpj) {
       riskPoints += 40;
+      contentTampered = true;
       checks.push({
         status: 'fail',
         text: `O CNPJ impresso no documento (${invalidCnpj}) possui dígitos verificadores inválidos.`
@@ -802,12 +772,21 @@ function evaluateSingleBoleto(index, title, payload) {
     }
   }
 
+  // 3. Avaliação do QR Code Pix (Boleto Híbrido)
   if (pix) {
     if (/qr\s*code\s*indispon[íi]vel/i.test(textContent)) {
       riskPoints += 70;
+      contentTampered = true;
       checks.push({
         status: 'fail',
         text: `FRAUDE DETECTADA: O boleto informa "QR Code Indisponível", mas há um QR Code Pix injetado no arquivo em nome de "${pix.merchantName || 'Desconhecido'}".`
+      });
+    } else if (textContent && !pixRecipientMatchesText(pix.merchantName, textContent)) {
+      riskPoints += 60;
+      contentTampered = true;
+      checks.push({
+        status: 'fail',
+        text: `FRAUDE DETECTADA: O recebedor codificado no QR Code Pix ("${pix.merchantName}") não corresponde ao beneficiário impresso no boleto.`
       });
     } else {
       checks.push({
@@ -818,6 +797,7 @@ function evaluateSingleBoleto(index, title, payload) {
 
     if (pix.amount && boleto && boleto.amount && Math.abs(pix.amount - boleto.amount) > 0.02) {
       riskPoints += 50;
+      contentTampered = true;
       checks.push({
         status: 'fail',
         text: `Divergência entre Pix e Código de Barras: o QR Code cobra ${formatBRL(pix.amount)}, enquanto o boleto cobra ${formatBRL(boleto.amount)}.`
@@ -825,6 +805,81 @@ function evaluateSingleBoleto(index, title, payload) {
     }
   }
 
+  // 4. Perícia Forense do PDF com filtro inteligente para reorganização de páginas
+  if (payload.mode === 'pdf') {
+    const softwareRaw = getFormattedSoftwareName(payload.producer, payload.creator);
+    const softwareLower = softwareRaw.toLowerCase();
+
+    const isGraphicEditor = EDITORES_GRAFICOS.some((tool) => softwareLower.includes(tool));
+    const isReorgTool = FERRAMENTAS_REORGANIZACAO.some((tool) => softwareLower.includes(tool));
+    const isKnownAutomated = GERADORES_AUTOMATIZADOS.some((gen) => softwareLower.includes(gen));
+
+    // Verifica se o texto do PDF foi achatado em imagem (comum em falsificações visuais)
+    const isFlattenedImagePdf = textContent.trim().length < 40;
+    const hasIncrementalEdit =
+      payload.binaryForensics &&
+      (payload.binaryForensics.eofCount > 1 || payload.binaryForensics.hasIncrementalPrev);
+    const hasDateDrift =
+      Boolean(payload.creationDate && payload.modDate && payload.creationDate !== payload.modDate);
+    const hasVisualPatch = Boolean(payload.binaryForensics && payload.binaryForensics.hasOverlayAnnotations);
+
+    // Remendos visuais (/Square, /FreeText, /Stamp) nunca ocorrem em mera reorganização de páginas
+    if (hasVisualPatch) {
+      riskPoints += 50;
+      contentTampered = true;
+      checks.push({
+        status: 'fail',
+        text: 'Foram detectados objetos/carimbos ou caixas sobrepostas na camada de anotações do PDF.'
+      });
+    }
+
+    // Editores gráficos (Canva/Photoshop) ou PDF com texto achatado em imagem
+    if (isGraphicEditor || (isFlattenedImagePdf && (isReorgTool || hasIncrementalEdit))) {
+      riskPoints += 55;
+      contentTampered = true;
+      checks.push({
+        status: 'fail',
+        text: `PDF gerado ou achatado como imagem via editor gráfico (${softwareRaw || 'desconhecido'}), padrão típico de boletos adulterados.`
+      });
+    } else if (isReorgTool || hasIncrementalEdit || hasDateDrift) {
+      // Arquivo passou por ferramenta de PDF / extração de páginas:
+      // Só acusa fraude se houver alguma anomalia nos dados ou se o código de barras óptico não puder ser validado
+      const opticalVerified = Boolean(
+        boleto && boleto.validMath && (!payload.visualBarcode44 || payload.visualBarcode44 === boleto.barcode44)
+      );
+
+      if (contentTampered || !opticalVerified) {
+        riskPoints += 55;
+        checks.push({
+          status: 'fail',
+          text: `PDF modificado externamente (${softwareRaw || 'edição incremental'}) com inconsistências nos dados ou código de barras ilegível.`
+        });
+      } else {
+        // Reorganização/remoção de página benigna: todos os dados financeiros e barras estão 100% íntegros
+        checks.push({
+          status: 'ok',
+          text: `PDF regravado/reorganizado (${softwareRaw || 'edição de páginas'}), porém todos os dados financeiros, barras e valores permanecem 100% íntegros.`
+        });
+      }
+    } else if (isKnownAutomated) {
+      checks.push({
+        status: 'ok',
+        text: `Motor de emissão automatizado identificado (${softwareRaw}).`
+      });
+    } else if (!softwareRaw) {
+      checks.push({
+        status: 'ok',
+        text: 'Estrutura documental íntegra, sem sinais de sobreposição ou adulteração.'
+      });
+    } else {
+      checks.push({
+        status: 'ok',
+        text: `Documento emitido via ${softwareRaw} sem sinais de adulteração.`
+      });
+    }
+  }
+
+  // 5. Alerta de termos de engenharia social / falso protesto
   if (/protesto em cart[óo]rio|bloqueio judicial|taxa associativa|atualiza[çc][ãa]o cadastral/i.test(textContent)) {
     riskPoints += 25;
     checks.push({
@@ -851,7 +906,7 @@ function evaluateSingleBoleto(index, title, payload) {
     statusBadge = 'ALTO RISCO • INDÍCIOS DE ADULTERAÇÃO';
     verdictTitle = 'Não pague este boleto sem validação direta';
     verdictSummary =
-      'Foram encontradas inconsistências estruturais no PDF, divergências entre o documento e o código de barras ou sinais de edição posterior à emissão.';
+      'Foram encontradas inconsistências estruturais no PDF, divergências entre o documento e o código de barras ou sinais de adulteração nos dados de pagamento.';
   } else if (riskPoints > 0 || payload.mode === 'line') {
     statusKey = 'warning';
     statusBadge = 'ATENÇÃO • CONFERÊNCIA RECOMENDADA';
@@ -951,10 +1006,10 @@ function renderBatchResults(reports) {
         : `<div class="data-row"><dt>Linha Digitável</dt><dd>Não detectada no arquivo</dd></div>`;
 
       const softwareDisplay =
-        getFormattedSoftwareName(r.payload.producer, r.payload.creator) || 'Não informado / Removido';
+        getFormattedSoftwareName(r.payload.producer, r.payload.creator) || 'Não informado';
       const eofInfo =
         r.payload.binaryForensics && r.payload.binaryForensics.eofCount > 1
-          ? `Editado (${r.payload.binaryForensics.eofCount} revisões)`
+          ? `Regravado (${r.payload.binaryForensics.eofCount} revisões)`
           : r.payload.mode === 'pdf'
           ? 'Original (1 revisão)'
           : 'Não aplicável';
